@@ -656,6 +656,7 @@ const
   RPRF : TwbSignature = 'RPRF'; { New To Skyrim }
   RPRM : TwbSignature = 'RPRM'; { New To Skyrim }
   RVIS : TwbSignature = 'RVIS'; { New to Fallout 4 }
+  SADD : TwbSignature = 'SADD'; { New To Fallout 4 }
   SAKD : TwbSignature = 'SAKD'; { New To Fallout 4 }
   SAPT : TwbSignature = 'SAPT'; { New To Fallout 4 }
   SCCO : TwbSignature = 'SCCO'; { New To Fallout 4 }
@@ -1246,6 +1247,57 @@ begin
   s := Copy(s, 1, Pred(i));
 
   Result := StrToInt(s);
+end;
+
+function wbREFRNavmeshTriangleToStr(aInt: Int64; const aElement: IwbElement; aType: TwbCallbackType): string;
+var
+  Container  : IwbContainerElementRef;
+  Navmesh    : IwbElement;
+  MainRecord : IwbMainRecord;
+  Triangles  : IwbContainerElementRef;
+begin
+  case aType of
+    ctToStr: Result := IntToStr(aInt);
+    ctToEditValue: Result := IntToStr(aInt);
+    ctToSortKey: begin
+      Result := IntToHex64(aInt, 8);
+      Exit;
+    end;
+    ctCheck: Result := '';
+    ctEditType: Result := '';
+    ctEditInfo: Result := '';
+  end;
+
+  if not Assigned(aElement) then Exit;
+  Container := GetContainerRefFromUnionOrValue(aElement);
+  if not Assigned(Container) then Exit;
+
+  Navmesh := Container.Elements[0];
+
+  if not Assigned(Navmesh) then
+    Exit;
+
+  if not Supports(Navmesh.LinksTo, IwbMainRecord, MainRecord) then
+    Exit;
+
+  MainRecord := MainRecord.WinningOverride;
+
+  if MainRecord.Signature <> NAVM then begin
+    case aType of
+      ctToStr: Result := IntToStr(aInt) + ' <Warning: "'+MainRecord.ShortName+'" is not a Navmesh record>';
+      ctCheck: Result := '<Warning: "'+MainRecord.ShortName+'" is not a Navmesh record>';
+    end;
+    Exit;
+  end;
+
+  if Supports(MainRecord.ElementByPath['NVNM\Triangles'], IwbContainerElementRef, Triangles) and (aType = ctCheck) then
+    if aInt >= Triangles.ElementCount then
+      Result := '<Warning: Navmesh triangle not found in "' + MainRecord.Name + '">';
+end;
+
+function wbStringToInt(const aString: string; const aElement: IwbElement): Int64;
+begin
+  Result := StrToIntDef(aString, 0);
 end;
 
 { Alias to string conversion, requires quest reference or quest record specific to record that references alias }
@@ -6281,6 +6333,8 @@ begin
       wbFormIDCk('Ref', [PLYR, ACHR, REFR, PGRE, PHZD, PMIS, PARW, PBAR, PBEA, PCON, PFLA])
     ], cpNormal, False, nil, 1)),
 
+    wbRArray('Unknown', wbUnknown(XPLK)),
+
     {--- Activate Parents ---}
     wbRStruct('Activate Parents', [
       wbInteger(XAPD, 'Flags', itU8, wbFlags([
@@ -10655,9 +10709,9 @@ begin
       wbFloat('Unknown'),
       wbFloat('Unknown'),
       wbFloat('Unknown')
-      //wbUnknown
     ], cpNormal, True, nil, 15),
-    wbStruct(DALC, 'Directional Ambient Lighting Colors', [wbAmbientColors], cpNormal, True)
+    wbStruct(DALC, 'Directional Ambient Lighting Colors', [wbAmbientColors], cpNormal, True),
+    wbFormIDCk(WGDR, 'Godray', [GDRY])
   ]);
 
   wbRecord(MUSC, 'Music Type', [
@@ -11327,6 +11381,7 @@ begin
       ])),
       wbInteger('Reset Hours', itU16, wbDiv(2730))
     ]),
+    wbFormIDCkNoReach(PNAM, 'Previous INFO', [INFO, NULL], False, cpBenign),
     wbFormIDCk(DNAM, 'Unknown', [INFO]),
     wbFormIDCk(GNAM, 'Unknown', [INFO]),
     wbString(IOVR, 'Unknown'),
@@ -13117,6 +13172,7 @@ begin
 //      ], [])
 //    ),
 
+    wbFormIDCk(SADD, 'Additional States', [RACE]),
     // Version where wbRUnion accepts wbRArray members:
     wbRArray('State Groups',
       wbRStruct('State Group Struct', [
@@ -13470,7 +13526,7 @@ begin
     {--- Generated Data ---}
     wbStruct(XNDP, 'Navigation Door Link', [
       wbFormIDCk('Navigation Mesh', [NAVM]),
-      wbInteger('Teleport Marker Triangle', itS16),
+      wbInteger('Teleport Marker Triangle', itS16, wbREFRNavmeshTriangleToStr, wbStringToInt),
       wbByteArray('Unused', 2, cpIgnore)
     ]),
 
@@ -13916,7 +13972,7 @@ begin
       ],
       cpNormal, False
     )
-  ]);
+  ], True);  // unordered, NVNM can be before or after MNAM
 
   wbRecord(TES4, 'Main File Header',
     wbFlags(wbRecordFlagsFlags, wbFlagsList([
@@ -15017,7 +15073,8 @@ begin
   wbRecord(RFGP, 'Reference Group', [
     wbEDID,
     wbString(NNAM, 'Name'),
-    wbFormIDCk(RNAM, 'Reference', [REFR])
+    wbFormIDCk(RNAM, 'Reference', [REFR]),
+    wbUnknown(PNAM)
   ]);
 
   wbRecord(RGDL, 'RGDL', [
